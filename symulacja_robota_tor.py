@@ -2,16 +2,15 @@ import pygame
 import sys
 import math
 import numpy as np
-import random
 import pygame
 from collections import deque
 import matplotlib.pyplot as plt
 from IPython import display
-import time
 import neat
 import json
 import pickle
 import easygui
+from multiprocessing import Process , Queue
 
 clock = pygame.time.Clock()
 pygame.init()
@@ -44,7 +43,22 @@ class Word:
         winner = self.population.run(self.eval_population , self.epoch)
         return winner
     def eval_population(self , genomes, config):
-        self.e.symulacja(genomes, config)
+        q = Queue()
+        a , b ,c , d = distribute_into_four(genomes)
+        processes = [] 
+        for part in (a, b, c, d): 
+            p = Process(target=self.e.symulacja, args=(q ,part, config)) 
+            processes.append(p) 
+            p.start() 
+        fit = []
+        for _ in range(4): 
+            fit.extend(q.get())
+        for p in processes: 
+            p.join()
+        genome_map = {genome_id: genome for genome_id, genome in genomes} 
+        for id, r in fit: 
+            genome_map[id].fitness = r
+
             
     def write_genome(self , winner):
        with open("best_genome.pkl", "wb") as f: 
@@ -238,13 +252,13 @@ class cele :
                 if self.visited[(cel.x, cel.y)] != -1 :
                     self.visited[(cel.x, cel.y)] += 1
                     if self.visited[(cel.x, cel.y)] > 20 :
-                        reward -= 1
+                        reward -= 10
                     
                 elif self.cele.index(cel) == 0 and all(el == -1 for el in self.visited.values()):
                     reward += 100
                     self.new_start()
                 else :
-                    reward -= 10
+                    reward -= 0.2
             elif not czolg.kolizja([cel]) and  self.visited[(cel.x, cel.y)] > 0 :
                 self.visited[(cel.x, cel.y)] = -1
         return reward
@@ -273,10 +287,16 @@ class agent():
         kolizja = self.czolg.update(action , sciany)
         if kolizja :
             tank_collision_with_walls -= 25
+        if not kolizja: 
+            tank_collision_with_walls += 0.05
         self.reward += self.cel.colide_tick(self.czolg) + tank_collision_with_walls
     def draw(self):
         self.czolg.draw(okno)
-        
+def distribute_into_four(lst):
+    result = [[], [], [], []] 
+    for i, val in enumerate(lst): 
+        result[i % 4].append(val) 
+    return result       
     
         
 class env :
@@ -297,8 +317,8 @@ class env :
         plt.ylim(ymin=0)
         plt.show(block=False)
         plt.pause(.1)
-    def symulacja(self , genomes, config):
-        tury = (len(self.c) * 32)* 2
+    def symulacja(self , q ,genomes, config):
+        tury = (len(self.c) * 32)
         line_genome = []
         for genome_id, genome in genomes:
             line_genome.append([genome_id, genome , agent(self.c , genome , config)])
@@ -326,11 +346,13 @@ class env :
                     a.draw()
             pygame.display.flip()
         print("new")
+        dane_for_queue = []
         for id , genome , n in line_genome :
-            genome.fitness =  n.reward + 0.1
-        
+            dane_for_queue.append([id , n.reward + 0.1])
+        q.put(dane_for_queue)
 
-a = Word()
-winner = a.train()
-a.write_genome(winner)
-pygame.quit()
+if __name__ == "__main__":
+    a = Word()
+    winner = a.train()
+    a.write_genome(winner)
+    pygame.quit()
